@@ -10,7 +10,7 @@ type ChipProps = {
   children: ReactNode;
 } & Omit<ButtonHTMLAttributes<HTMLButtonElement>, "color" | "onAnimationStart" | "onDrag" | "onDragStart" | "onDragEnd" | "onAnimationEnd">;
 
-/** Botão-pílula de seleção (empresa, prazo...). Alto o bastante para o dedo: 40px. */
+/** Botão-pílula de seleção (lista, tag, prazo...). Alto o bastante para o dedo: 40px. */
 export function Chip({ selected, color, icon, children, className, ...props }: ChipProps) {
   const reduce = useReducedMotion();
   return (

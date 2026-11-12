@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowUp, ChevronDown, Inbox, Settings2, SlidersHorizontal, Sparkles } from "lucide-react";
+import { ArrowUp, ChevronDown, Inbox, Settings2, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatedToastStack, useAnimatedToastStack } from "@/components/motion/animated-toast-stack";
 import { SortableList, SortableListGroup } from "@/components/motion/sortable-list";
@@ -34,7 +34,7 @@ const MESSAGES = {
 
 export default function App() {
   const store = useStore();
-  const { contexts, tasks } = store;
+  const { contexts, tasks, tags } = store;
   const reduce = useReducedMotion();
   const toast = useAnimatedToastStack({ defaultDuration: 4000, limit: 3 });
 
@@ -50,9 +50,10 @@ export default function App() {
   const [showDone, setShowDone] = useState(false);
   const [completing, setCompleting] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState("");
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const quickInput = useRef<HTMLInputElement>(null);
 
-  // Se a empresa da aba atual for removida, volta para a Entrada.
+  // Se a lista da aba atual for removida, volta para a Entrada.
   const activeTab = tab === INBOX || contexts.some((c) => c.id === tab) ? tab : INBOX;
   useEffect(() => {
     try {
@@ -79,16 +80,25 @@ export default function App() {
   const activeContextId = activeTab === INBOX ? null : activeTab;
   const activeContext = contexts.find((c) => c.id === activeContextId);
   const contextById = useMemo(() => new Map(contexts.map((c) => [c.id, c])), [contexts]);
+  const tagById = useMemo(() => new Map(tags.map((t) => [t.id, t])), [tags]);
+  const tagsOf = (task: Task) => task.tagIds.flatMap((id) => tagById.get(id) ?? []);
 
   const pendingFor = useCallback(
     (contextId: string | null) =>
       tasks.filter((t) => t.contextId === contextId && !t.done).sort((a, b) => a.order - b.order),
     [tasks],
   );
-  const pending = pendingFor(activeContextId);
-  const done = tasks
+  const listPending = pendingFor(activeContextId);
+  const listDone = tasks
     .filter((t) => t.contextId === activeContextId && t.done)
     .sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0));
+
+  // Tags usadas nesta lista viram filtros.
+  const listTags = tags.filter((tag) => [...listPending, ...listDone].some((t) => t.tagIds.includes(tag.id)));
+  const activeFilter = tagFilter && listTags.some((t) => t.id === tagFilter) ? tagFilter : null;
+  const byFilter = (t: Task) => !activeFilter || t.tagIds.includes(activeFilter);
+  const pending = listPending.filter(byFilter);
+  const done = listDone.filter(byFilter);
 
   const allPending = tasks.filter((t) => !t.done);
   const dueToday = allPending.filter((t) => t.due && daysFromToday(t.due) === 0).length;
@@ -103,7 +113,7 @@ export default function App() {
       quickInput.current?.focus();
       return;
     }
-    store.addTask({ title, contextId: activeContextId });
+    store.addTask({ title, contextId: activeContextId, tagIds: activeFilter ? [activeFilter] : [] });
     setDraft("");
     quickInput.current?.focus();
   };
@@ -179,7 +189,7 @@ export default function App() {
             <button
               type="button"
               onClick={() => setContextsOpen(true)}
-              aria-label="Gerenciar empresas"
+              aria-label="Gerenciar listas e tags"
               className="grid size-12 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               <Settings2 size={20} />
@@ -211,13 +221,54 @@ export default function App() {
 
         {/* Lista */}
         <main className="flex-1 px-4 pb-40 pt-4">
+          {listTags.length ? (
+            <div
+              className="-mx-4 mb-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none]"
+              role="group"
+              aria-label="Filtrar por tag"
+            >
+              {listTags.map((tag) => {
+                const on = activeFilter === tag.id;
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setTagFilter(on ? null : tag.id)}
+                    className={cn(
+                      "inline-flex h-8 shrink-0 items-center gap-1 rounded-full border px-3 text-xs font-medium transition-colors",
+                      on ? "border-current" : "border-border hover:bg-muted",
+                    )}
+                    style={{ color: tag.color, background: on ? `${tag.color}14` : undefined }}
+                  >
+                    #{tag.name}
+                    {on ? <X size={12} aria-hidden /> : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {activeFilter && pending.length > 1 ? (
+            <p className="mb-2 px-2 text-xs leading-4 text-muted-foreground">
+              Para mudar a prioridade, tire o filtro.
+            </p>
+          ) : null}
+
           {pending.length === 0 ? (
+            activeFilter ? (
+              <p className="px-2 py-8 text-center text-sm text-muted-foreground">
+                Nenhuma tarefa pendente com essa tag aqui.
+              </p>
+            ) : (
             <EmptyState inbox={activeTab === INBOX} name={activeContext?.name} hasDone={done.length > 0} />
+            )
           ) : (
             <SortableList<Task>
               items={pending}
               onItemsChange={(items) => store.reorderTasks(items.map((t) => t.id))}
               getItemLabel={(t) => t.title}
+              disabled={!!activeFilter}
               className="max-w-none"
             >
               {(items) => (
@@ -227,6 +278,8 @@ export default function App() {
                       key={task.id}
                       task={task}
                       context={task.contextId ? contextById.get(task.contextId) : undefined}
+                      tags={tagsOf(task)}
+                      disabled={!!activeFilter}
                       completing={completing.has(task.id)}
                       onToggle={toggle}
                       onOpen={(t) => setSheet({ mode: "edit", task: t })}
@@ -239,7 +292,7 @@ export default function App() {
 
           {activeTab === INBOX && pending.length > 0 && contexts.length > 0 ? (
             <p className="mt-4 px-2 text-xs leading-4 text-muted-foreground">
-              Toque numa tarefa para mandar para uma empresa.
+              Toque numa tarefa para mandar para uma lista.
             </p>
           ) : null}
 
@@ -307,7 +360,12 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
-                  setSheet({ mode: "create", title: draft.trim(), contextId: activeContextId });
+                  setSheet({
+                    mode: "create",
+                    title: draft.trim(),
+                    contextId: activeContextId,
+                    tagIds: activeFilter ? [activeFilter] : [],
+                  });
                   setDraft("");
                 }}
                 aria-label="Adicionar com detalhes"
@@ -350,12 +408,14 @@ export default function App() {
         <TaskSheet
           state={sheet}
           contexts={contexts}
+          tags={tags}
+          onAddTag={(name) => store.addTag(name)}
           onClose={() => setSheet({ mode: "closed" })}
           onCreate={(d) => {
             const created = store.addTask(d);
             if (created.contextId !== activeContextId) {
               const where = created.contextId ? contextById.get(created.contextId)?.name : "Entrada";
-              notify(`Adicionada em ${where ?? "outra empresa"}`, "success");
+              notify(`Adicionada em ${where ?? "outra lista"}`, "success");
             }
           }}
           onUpdate={store.updateTask}
@@ -400,7 +460,7 @@ function EmptyState({ inbox, name, hasDone }: { inbox: boolean; name?: string; h
       </h2>
       <p className="mt-2 max-w-xs text-sm leading-6 text-muted-foreground">
         {inbox
-          ? "Anote qualquer coisa no campo abaixo. Depois você organiza por empresa e prioridade."
+          ? "Anote qualquer coisa no campo abaixo. Depois você organiza por lista e prioridade."
           : "Escreva no campo abaixo para adicionar. Arraste pela alça para priorizar."}
       </p>
     </div>

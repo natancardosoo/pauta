@@ -1,18 +1,20 @@
 # Pauta
 
-Uma entrada central para todas as tarefas que aparecem no dia: o chefe pediu um relatório, surgiu uma demanda da Retake, lembrou de algo no caminho. Anota em segundos (só o título é obrigatório), organiza por empresa e prioridade arrastando, e marca como concluída.
+Uma entrada central para todas as tarefas que aparecem no dia: o chefe pediu um relatório, surgiu uma demanda da Retake, lembrou de algo pessoal no caminho. Anota em segundos (só o título é obrigatório), organiza por lista e prioridade arrastando, e marca como concluída.
 
 Feito pensando primeiro no celular, funciona também no PC.
 
 ## Como funciona
 
 - **Captura rápida**: o campo fica sempre no rodapé, ao alcance do polegar. Digite e envie. No PC, aperte `/` ou `n` para ir direto a ele.
-- **Entrada**: tudo o que ainda não tem empresa cai aqui. Toque numa tarefa para mandar para uma empresa.
-- **Empresas**: cada uma vira uma aba (Trabalho, Retake...). Crie, renomeie, mude a cor e a ordem pelo botão de ajustes no topo.
+- **Entrada**: tudo o que ainda não tem lista cai aqui. Toque numa tarefa para mandar para uma lista.
+- **Listas**: cada uma vira uma aba (Trabalho, Retake, Pessoal...). Crie, renomeie, mude a cor e a ordem pelo botão de ajustes no topo.
 - **Prioridade**: arraste pela alça (⋮⋮) para cima ou para baixo. Com teclado, foque a alça e use as setas.
-- **Detalhes opcionais**: prazo (Hoje, Amanhã, Sexta, Segunda ou qualquer data), quem pediu e anotações.
+- **Checklist**: dentro de cada tarefa, com o progresso (ex.: 2/5) aparecendo na lista.
+- **Tags**: crie na hora dentro da tarefa (ex.: #urgente) e filtre a lista tocando nelas. Renomeie, troque a cor ou exclua no painel de ajustes.
+- **Detalhes opcionais**: prazo (Hoje, Amanhã, Sexta, Segunda ou qualquer data), quem pediu e anotações. Ao editar, fechar o painel já salva.
 - **Concluir**: toque no quadradinho. Dá para desfazer pelo aviso que aparece.
-- **Backup**: exporte/importe um arquivo `.json` pelo painel de Empresas.
+- **Backup**: exporte/importe um arquivo `.json` pelo painel de ajustes (Listas e tags).
 
 Os dados ficam salvos no próprio aparelho (localStorage). Sincronizar celular e PC é o próximo passo.
 

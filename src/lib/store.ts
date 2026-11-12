@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-/** Uma "empresa" (ou contexto): Trabalho, Retake, Pessoal... */
+/** Uma lista: Trabalho, Retake, Pessoal... */
 export type Context = {
   id: string;
   name: string;
@@ -8,26 +8,32 @@ export type Context = {
   order: number;
 };
 
+export type ChecklistItem = { id: string; text: string; done: boolean };
+
+export type Tag = { id: string; name: string; color: string };
+
 export type Task = {
   id: string;
   title: string;
-  /** null = ainda na Entrada (sem empresa) */
+  /** null = ainda na Entrada (sem lista) */
   contextId: string | null;
   /** Data no formato YYYY-MM-DD */
   due: string | null;
   requester: string;
   notes: string;
+  checklist: ChecklistItem[];
+  tagIds: string[];
   done: boolean;
   doneAt: number | null;
   createdAt: number;
-  /** Posição dentro da lista da empresa (menor = mais prioritário) */
+  /** Posição dentro da lista (menor = mais prioritário) */
   order: number;
 };
 
 export type TaskDraft = Pick<Task, "title"> &
-  Partial<Pick<Task, "contextId" | "due" | "requester" | "notes">>;
+  Partial<Pick<Task, "contextId" | "due" | "requester" | "notes" | "checklist" | "tagIds">>;
 
-type State = { version: 1; contexts: Context[]; tasks: Task[] };
+type State = { version: 1; contexts: Context[]; tasks: Task[]; tags: Tag[] };
 
 const STORAGE_KEY = "pauta:v1";
 
@@ -42,6 +48,18 @@ export const CONTEXT_COLORS = [
   "#64748b", // grafite
 ];
 
+/** Cores de tag: tons que funcionam como texto sobre fundo claro. */
+export const TAG_COLORS = [
+  "#4f46e5",
+  "#0284c7",
+  "#0f8a44",
+  "#c2410c",
+  "#be123c",
+  "#a21caf",
+  "#b45309",
+  "#475569",
+];
+
 export const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
@@ -53,8 +71,35 @@ function seed(): State {
     contexts: [
       { id: uid(), name: "Trabalho", color: CONTEXT_COLORS[0], order: 0 },
       { id: uid(), name: "Retake", color: CONTEXT_COLORS[3], order: 1 },
+      { id: uid(), name: "Pessoal", color: CONTEXT_COLORS[2], order: 2 },
     ],
     tasks: [],
+    tags: [],
+  };
+}
+
+/** Completa campos que versões antigas não tinham. */
+function normalize(raw: Partial<State> & { contexts: Context[]; tasks: Partial<Task>[] }): State {
+  return {
+    version: 1,
+    contexts: raw.contexts,
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    tasks: raw.tasks.map(
+      (t): Task => ({
+        id: t.id ?? uid(),
+        title: t.title ?? "",
+        contextId: t.contextId ?? null,
+        due: t.due ?? null,
+        requester: t.requester ?? "",
+        notes: t.notes ?? "",
+        checklist: Array.isArray(t.checklist) ? t.checklist : [],
+        tagIds: Array.isArray(t.tagIds) ? t.tagIds : [],
+        done: t.done ?? false,
+        doneAt: t.doneAt ?? null,
+        createdAt: t.createdAt ?? Date.now(),
+        order: t.order ?? 0,
+      }),
+    ),
   };
 }
 
@@ -62,15 +107,14 @@ function load(): State {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return seed();
-    const parsed = JSON.parse(raw) as State;
-    if (!Array.isArray(parsed.contexts) || !Array.isArray(parsed.tasks)) return seed();
-    return parsed;
+    const parsed = JSON.parse(raw);
+    return isState(parsed) ? normalize(parsed) : seed();
   } catch {
     return seed();
   }
 }
 
-function isState(value: unknown): value is State {
+function isState(value: unknown): value is Parameters<typeof normalize>[0] {
   const v = value as State;
   return !!v && Array.isArray(v.contexts) && Array.isArray(v.tasks);
 }
@@ -92,7 +136,7 @@ export function useStore() {
       if (event.key === STORAGE_KEY && event.newValue) {
         try {
           const next = JSON.parse(event.newValue);
-          if (isState(next)) setState(next);
+          if (isState(next)) setState(normalize(next));
         } catch {
           /* ignora */
         }
@@ -110,6 +154,8 @@ export function useStore() {
       due: draft.due ?? null,
       requester: draft.requester?.trim() ?? "",
       notes: draft.notes?.trim() ?? "",
+      checklist: draft.checklist ?? [],
+      tagIds: draft.tagIds ?? [],
       done: false,
       doneAt: null,
       createdAt: Date.now(),
@@ -128,7 +174,7 @@ export function useStore() {
       const current = s.tasks.find((t) => t.id === id);
       if (!current) return s;
       const next = { ...current, ...patch };
-      // Mudou de empresa: entra no fim da fila da nova empresa.
+      // Mudou de lista: entra no fim da fila da nova lista.
       if (patch.contextId !== undefined && patch.contextId !== current.contextId) {
         const siblings = s.tasks.filter((t) => t.contextId === patch.contextId && !t.done);
         next.order = siblings.reduce((max, t) => Math.max(max, t.order), -1) + 1;
@@ -199,7 +245,7 @@ export function useStore() {
     }));
   }, []);
 
-  /** Remove a empresa; as tarefas dela voltam para a Entrada. */
+  /** Remove a lista; as tarefas dela voltam para a Entrada. */
   const deleteContext = useCallback((id: string) => {
     setState((s) => {
       const inboxMax = s.tasks
@@ -230,7 +276,31 @@ export function useStore() {
   const importData = useCallback((json: string) => {
     const parsed = JSON.parse(json);
     if (!isState(parsed)) throw new Error("Arquivo inválido");
-    setState({ version: 1, contexts: parsed.contexts, tasks: parsed.tasks });
+    setState(normalize(parsed));
+  }, []);
+
+  const addTag = useCallback((name: string, color?: string) => {
+    const tag: Tag = { id: uid(), name: name.trim(), color: color ?? TAG_COLORS[0] };
+    setState((s) => {
+      // Quem chama deve checar nomes repetidos antes; aqui só evita duplicar.
+      if (s.tags.some((t) => t.name.toLowerCase() === tag.name.toLowerCase())) return s;
+      if (!color) tag.color = TAG_COLORS[s.tags.length % TAG_COLORS.length];
+      return { ...s, tags: [...s.tags, tag] };
+    });
+    return tag;
+  }, []);
+
+  const updateTag = useCallback((id: string, patch: Partial<Tag>) => {
+    setState((s) => ({ ...s, tags: s.tags.map((t) => (t.id === id ? { ...t, ...patch } : t)) }));
+  }, []);
+
+  /** Remove a tag de todas as tarefas. */
+  const deleteTag = useCallback((id: string) => {
+    setState((s) => ({
+      ...s,
+      tags: s.tags.filter((t) => t.id !== id),
+      tasks: s.tasks.map((t) => (t.tagIds.includes(id) ? { ...t, tagIds: t.tagIds.filter((x) => x !== id) } : t)),
+    }));
   }, []);
 
   const contexts = [...state.contexts].sort((a, b) => a.order - b.order);
@@ -238,6 +308,10 @@ export function useStore() {
   return {
     contexts,
     tasks: state.tasks,
+    tags: [...state.tags].sort((a, b) => a.name.localeCompare(b.name, "pt-BR")),
+    addTag,
+    updateTag,
+    deleteTag,
     addTask,
     updateTask,
     setDone,

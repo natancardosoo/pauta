@@ -1,4 +1,4 @@
-import { CalendarDays, FileText, UserRound } from "lucide-react";
+import { CalendarDays, FileText, ListChecks, UserRound } from "lucide-react";
 import { Checkbox } from "@/components/motion/checkbox";
 import {
   SortableListHandle,
@@ -6,7 +6,7 @@ import {
   SortableListItemContent,
 } from "@/components/motion/sortable-list";
 import { describeDue, type DueTone } from "@/lib/dates";
-import type { Context, Task } from "@/lib/store";
+import type { Context, Tag, Task } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 const DUE_CLASS: Record<DueTone, string> = {
@@ -16,11 +16,24 @@ const DUE_CLASS: Record<DueTone, string> = {
   later: "bg-muted text-muted-foreground",
 };
 
-type MetaProps = { task: Task; context?: Context; showContext?: boolean };
+type MetaProps = { task: Task; context?: Context; showContext?: boolean; tags?: Tag[] };
 
-export function TaskMeta({ task, context, showContext }: MetaProps) {
+export function TagPill({ tag, className }: { tag: Tag; className?: string }) {
+  return (
+    <span
+      className={cn("inline-flex h-6 items-center rounded-full px-2 text-xs font-medium", className)}
+      style={{ color: tag.color, background: `${tag.color}14` }}
+    >
+      #{tag.name}
+    </span>
+  );
+}
+
+export function TaskMeta({ task, context, showContext, tags = [] }: MetaProps) {
   const due = task.due ? describeDue(task.due) : null;
-  const hasMeta = due || task.requester || task.notes || (showContext && context);
+  const total = task.checklist.length;
+  const checked = task.checklist.filter((i) => i.done).length;
+  const hasMeta = due || task.requester || task.notes || total || tags.length || (showContext && context);
   if (!hasMeta) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
@@ -41,6 +54,18 @@ export function TaskMeta({ task, context, showContext }: MetaProps) {
           {due.label}
         </span>
       ) : null}
+      {total ? (
+        <span
+          className={cn(
+            "inline-flex items-center gap-1 tabular-nums",
+            checked === total ? "text-success" : "text-muted-foreground",
+          )}
+          aria-label={`Checklist: ${checked} de ${total}`}
+        >
+          <ListChecks size={12} aria-hidden />
+          {checked}/{total}
+        </span>
+      ) : null}
       {task.requester ? (
         <span className="inline-flex items-center gap-1 text-muted-foreground">
           <UserRound size={12} aria-hidden />
@@ -52,6 +77,9 @@ export function TaskMeta({ task, context, showContext }: MetaProps) {
           <FileText size={12} aria-label="Tem anotações" />
         </span>
       ) : null}
+      {tags.map((tag) => (
+        <TagPill key={tag.id} tag={tag} />
+      ))}
     </div>
   );
 }
@@ -59,6 +87,8 @@ export function TaskMeta({ task, context, showContext }: MetaProps) {
 type RowProps = {
   task: Task;
   context?: Context;
+  tags?: Tag[];
+  disabled?: boolean;
   showContext?: boolean;
   completing?: boolean;
   onToggle: (task: Task) => void;
@@ -66,7 +96,7 @@ type RowProps = {
 };
 
 /** Linha arrastável (lista de pendentes). */
-export function SortableTaskRow({ task, context, showContext, completing, onToggle, onOpen }: RowProps) {
+export function SortableTaskRow({ task, context, tags, disabled, showContext, completing, onToggle, onOpen }: RowProps) {
   return (
     <SortableListItem
       id={task.id}
@@ -76,7 +106,10 @@ export function SortableTaskRow({ task, context, showContext, completing, onTogg
       )}
     >
       <SortableListHandle
-        className="h-14 w-8 rounded-l-2xl rounded-r-none text-muted-foreground/60 hover:bg-transparent"
+        className={cn(
+          "h-14 w-8 rounded-l-2xl rounded-r-none text-muted-foreground/60 hover:bg-transparent",
+          disabled && "invisible",
+        )}
         aria-label={`Arrastar "${task.title}" para mudar a prioridade`}
       />
       <Checkbox
@@ -99,7 +132,7 @@ export function SortableTaskRow({ task, context, showContext, completing, onTogg
           >
             {task.title}
           </span>
-          <TaskMeta task={task} context={context} showContext={showContext} />
+          <TaskMeta task={task} context={context} showContext={showContext} tags={tags} />
         </button>
       </SortableListItemContent>
     </SortableListItem>
@@ -107,7 +140,7 @@ export function SortableTaskRow({ task, context, showContext, completing, onTogg
 }
 
 /** Linha simples para tarefas concluídas. */
-export function DoneTaskRow({ task, onToggle, onOpen }: Omit<RowProps, "context" | "completing">) {
+export function DoneTaskRow({ task, onToggle, onOpen }: Omit<RowProps, "context" | "completing" | "tags" | "disabled">) {
   return (
     <li className="flex items-center gap-0 rounded-2xl pl-8 pr-2">
       <Checkbox
