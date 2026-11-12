@@ -38,7 +38,13 @@ export default function App() {
   const reduce = useReducedMotion();
   const toast = useAnimatedToastStack({ defaultDuration: 4000, limit: 3 });
 
-  const [tab, setTab] = useState<string>(() => localStorage.getItem(ACTIVE_TAB_KEY) ?? INBOX);
+  const [tab, setTab] = useState<string>(() => {
+    try {
+      return localStorage.getItem(ACTIVE_TAB_KEY) ?? INBOX;
+    } catch {
+      return INBOX;
+    }
+  });
   const [sheet, setSheet] = useState<SheetState>({ mode: "closed" });
   const [contextsOpen, setContextsOpen] = useState(false);
   const [showDone, setShowDone] = useState(false);
@@ -49,7 +55,11 @@ export default function App() {
   // Se a empresa da aba atual for removida, volta para a Entrada.
   const activeTab = tab === INBOX || contexts.some((c) => c.id === tab) ? tab : INBOX;
   useEffect(() => {
-    localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+    try {
+      localStorage.setItem(ACTIVE_TAB_KEY, activeTab);
+    } catch {
+      /* armazenamento indisponível */
+    }
   }, [activeTab]);
 
   // No PC: "/" ou "n" foca o campo de anotação.
