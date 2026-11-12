@@ -251,7 +251,7 @@ export function TaskSheet({ state, contexts, tags, onClose, onCreate, onUpdate, 
           </ul>
         </section>
 
-        <fieldset className="flex flex-col gap-2">
+        <fieldset className="flex min-w-0 flex-col gap-2">
           <legend className="mb-2 px-1 text-sm font-medium">Lista</legend>
           <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
             <Chip selected={contextId === null} icon={<Inbox size={16} />} onClick={() => setContextId(null)}>
@@ -279,7 +279,7 @@ export function TaskSheet({ state, contexts, tags, onClose, onCreate, onUpdate, 
           ) : null}
         </fieldset>
 
-        <fieldset className="flex flex-col gap-2">
+        <fieldset className="flex min-w-0 flex-col gap-2">
           <legend className="mb-2 px-1 text-sm font-medium">Tags</legend>
           <div className="flex flex-wrap gap-2">
             {tags.map((tag) => {
@@ -314,7 +314,7 @@ export function TaskSheet({ state, contexts, tags, onClose, onCreate, onUpdate, 
           ) : null}
         </fieldset>
 
-        <fieldset className="flex flex-col gap-2">
+        <fieldset className="flex min-w-0 flex-col gap-2">
           <legend className="mb-2 px-1 text-sm font-medium">Prazo</legend>
           <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
             <Chip selected={due === null} onClick={() => setDue(null)}>

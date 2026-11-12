@@ -3,9 +3,11 @@
 
 import {
   AnimatePresence,
+  animate,
   motion,
   type PanInfo,
   useDragControls,
+  useMotionValue,
   useReducedMotion,
 } from "motion/react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
@@ -63,6 +65,9 @@ export function BottomSheet({
   const [mounted, setMounted] = useState(false);
   const dragControls = useDragControls();
   const sheetRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Shared by Motion's drag (header) and the manual pull on the content.
+  const y = useMotionValue(0);
   const reduce = useReducedMotion();
   const uid = useId();
   const titleId = `${uid}-title`;
@@ -114,18 +119,107 @@ export function BottomSheet({
     };
   }, [open]);
 
-  const onDragEnd = (_: unknown, info: PanInfo) => {
-    const velocity = info.velocity.y;
-    const offset = info.offset.y;
-
+  /** Decides where a downward/upward drag lands. Returns true when it closed. */
+  const settle = (offset: number, velocity: number) => {
     // Strong downward fling or large drag → dismiss.
     if (velocity > 600 || offset > dismissThreshold) {
       const smaller = snapPoints.map((_, i) => i).filter((i) => i < snap);
       if (smaller.length && velocity < 800 && offset < dismissThreshold * 1.6) {
         setSnap(smaller[smaller.length - 1]);
-      } else {
-        onOpenChange(false);
+        return false;
       }
+      onOpenChange(false);
+      return true;
+    }
+    return false;
+  };
+
+  const settleRef = useRef(settle);
+  settleRef.current = settle;
+
+  // Pull-to-dismiss from the content: when the content is scrolled to the top
+  // and the finger moves down, the sheet follows the finger instead of the
+  // scroll. Touch events (not pointer events) because the browser cancels the
+  // pointer stream as soon as it starts its own pan; a non-passive touchmove
+  // can still claim the gesture with preventDefault.
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!open || !mounted || !el) return;
+
+    let mode: "idle" | "pending" | "drag" | "scroll" = "idle";
+    let startX = 0;
+    let startY = 0;
+    let lastY = 0;
+    let lastT = 0;
+    let velocity = 0;
+
+    const onStart = (e: TouchEvent) => {
+      const target = e.target as Element | null;
+      if (
+        e.touches.length !== 1 ||
+        target?.closest(".touch-none, [data-sheet-no-drag], textarea")
+      ) {
+        mode = "scroll";
+        return;
+      }
+      const t = e.touches[0];
+      startX = t.clientX;
+      startY = lastY = t.clientY;
+      lastT = e.timeStamp;
+      velocity = 0;
+      mode = "pending";
+    };
+
+    const onMove = (e: TouchEvent) => {
+      if (mode === "idle" || mode === "scroll") return;
+      const t = e.touches[0];
+      const dy = t.clientY - startY;
+      if (mode === "pending") {
+        const dx = t.clientX - startX;
+        if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+        if (dy > 0 && Math.abs(dy) > Math.abs(dx) && el.scrollTop <= 0) {
+          mode = "drag";
+          startY = t.clientY;
+        } else {
+          mode = "scroll";
+          return;
+        }
+      }
+      e.preventDefault();
+      const dt = e.timeStamp - lastT;
+      if (dt > 0) velocity = ((t.clientY - lastY) / dt) * 1000;
+      lastY = t.clientY;
+      lastT = e.timeStamp;
+      y.set(Math.max(0, t.clientY - startY));
+    };
+
+    const onEnd = () => {
+      const wasDrag = mode === "drag";
+      mode = "idle";
+      if (!wasDrag) return;
+      if (!settleRef.current(y.get(), velocity)) {
+        animate(y, 0, { type: "spring", stiffness: 400, damping: 40 });
+      }
+    };
+
+    el.addEventListener("touchstart", onStart, { passive: true });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd);
+    el.addEventListener("touchcancel", onEnd);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", onEnd);
+    };
+  }, [open, mounted, y]);
+
+  const onDragEnd = (_: unknown, info: PanInfo) => {
+    const velocity = info.velocity.y;
+    const offset = info.offset.y;
+
+    if (velocity > 600 || offset > dismissThreshold) {
+      settle(offset, velocity);
       return;
     }
 
@@ -201,7 +295,7 @@ export function BottomSheet({
               exit={reduce ? { y: 0, opacity: 0 } : { y: "100%" }}
               transition={reduce ? { duration: 0.18, ease: EASE_DRAWER } : DRAWER}
               {...gate}
-              style={{ ...heightStyle, ...gate.style }}
+              style={{ ...heightStyle, ...gate.style, y }}
               className={cn(
                 "pointer-events-auto fixed bottom-0 left-0 right-0 z-50 mx-auto flex max-w-2xl flex-col overflow-hidden rounded-t-3xl outline-none will-change-transform",
                 "border border-border bg-background shadow-xl",
@@ -214,17 +308,17 @@ export function BottomSheet({
               aria-describedby={description ? descriptionId : undefined}
               aria-label={title ? undefined : t("label")}
             >
-              <div className="flex flex-col items-center px-4 pb-2 pt-3">
-                {/* Drag only the pill so the title and description stay selectable. */}
-                <div
-                  onPointerDown={(event) => dragControls.start(event)}
-                  // A slow pull must not hand the gesture to iOS's callout,
-                  // which would leave the sheet frozen mid-drag.
-                  className={cn(
-                    "flex cursor-grab touch-none items-center justify-center py-1 active:cursor-grabbing",
-                    TOUCH_GESTURE_CONTENT_CLASS,
-                  )}
-                >
+              {/* The whole header is a drag handle — the pill alone is too small a target on a phone. */}
+              <div
+                onPointerDown={(event) => dragControls.start(event)}
+                // A slow pull must not hand the gesture to iOS's callout,
+                // which would leave the sheet frozen mid-drag.
+                className={cn(
+                  "flex cursor-grab touch-none flex-col items-center px-4 pb-2 pt-3 active:cursor-grabbing",
+                  TOUCH_GESTURE_CONTENT_CLASS,
+                )}
+              >
+                <div className="flex items-center justify-center py-1">
                   <div className="h-1.5 w-10 rounded-full bg-muted-foreground/40" />
                 </div>
                 {title || description ? (
@@ -249,7 +343,12 @@ export function BottomSheet({
                 ) : null}
               </div>
               {/* overscroll-contain stops boundary scrolls from chaining to the page. */}
-              <div className="flex-1 overflow-y-auto overscroll-contain px-4 pb-6">{children}</div>
+              <div
+                ref={contentRef}
+                className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 pb-6"
+              >
+                {children}
+              </div>
             </motion.div>
           )}
         </PresenceGate>
