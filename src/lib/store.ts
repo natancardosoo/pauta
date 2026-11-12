@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Uma lista: Trabalho, Retake, Pessoal... */
 export type Context = {
@@ -119,6 +119,177 @@ function isState(value: unknown): value is Parameters<typeof normalize>[0] {
   return !!v && Array.isArray(v.contexts) && Array.isArray(v.tasks);
 }
 
+/* ---------- Sincronização com o servidor do PC (mesma lista no PC e no celular) ---------- */
+
+const SYNC_KEY = "pauta:sync";
+const API = `${import.meta.env.BASE_URL}api/state`;
+const POLL_MS = 5000;
+
+/** Última versão confirmada pelo servidor (rev null = este aparelho nunca sincronizou). */
+type SyncMeta = { rev: number | null; base: State | null };
+type Remote = { rev: number; state: unknown };
+
+function loadSync(): SyncMeta {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SYNC_KEY) ?? "null");
+    if (parsed && (parsed.rev === null || typeof parsed.rev === "number")) {
+      return { rev: parsed.rev, base: isState(parsed.base) ? normalize(parsed.base) : null };
+    }
+  } catch {
+    /* ignora */
+  }
+  return { rev: null, base: null };
+}
+
+function saveSync(meta: SyncMeta) {
+  try {
+    localStorage.setItem(SYNC_KEY, JSON.stringify(meta));
+  } catch {
+    /* ignora */
+  }
+}
+
+const same = (a: unknown, b: unknown) => a === b || JSON.stringify(a) === JSON.stringify(b);
+
+/** Mescla item a item: o que este aparelho mudou desde a base vence; o resto vem do servidor. */
+function mergeById<T extends { id: string }>(base: T[], local: T[], remote: T[]): T[] {
+  const b = new Map(base.map((x) => [x.id, x]));
+  const l = new Map(local.map((x) => [x.id, x]));
+  const r = new Map(remote.map((x) => [x.id, x]));
+  const out: T[] = [];
+  for (const id of new Set([...r.keys(), ...l.keys()])) {
+    const pick = same(b.get(id), l.get(id)) ? r.get(id) : l.get(id);
+    if (pick) out.push(pick);
+  }
+  return out;
+}
+
+function merge(base: State | null, local: State, remote: State): State {
+  const b = base ?? { version: 1 as const, contexts: [], tasks: [], tags: [] };
+  return {
+    version: 1,
+    contexts: mergeById(b.contexts, local.contexts, remote.contexts),
+    tasks: mergeById(b.tasks, local.tasks, remote.tasks),
+    tags: mergeById(b.tags, local.tags, remote.tags),
+  };
+}
+
+function useServerSync(state: State, setState: (s: State) => void) {
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+  const [initialMeta] = useState<SyncMeta>(() => {
+    const m = loadSync();
+    // Se o que está salvo localmente é igual à base, usa o mesmo objeto (= nada pendente).
+    return m.base && same(m.base, state) ? { ...m, base: state } : m;
+  });
+  const meta = useRef<SyncMeta | null>(initialMeta);
+  const busy = useRef(false);
+  const disabled = useRef(false);
+
+  const setMeta = useCallback((rev: number, base: State) => {
+    meta.current = { rev, base };
+    saveSync(meta.current);
+  }, []);
+
+  /** Envia até o servidor ter a versão atual (mesclando se outro aparelho gravou antes). */
+  const push = useCallback(async (): Promise<void> => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const m = meta.current!;
+      const snapshot = stateRef.current;
+      if (snapshot === m.base) return;
+      const res = await fetch(API, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseRev: m.rev ?? 0, state: snapshot }),
+      });
+      if (res.ok) {
+        const { rev } = (await res.json()) as { rev: number };
+        setMeta(rev, snapshot);
+      } else if (res.status === 409) {
+        const remote = (await res.json()) as Remote;
+        if (!isState(remote.state)) return;
+        const server = normalize(remote.state);
+        const merged = merge(m.base, stateRef.current, server);
+        setMeta(remote.rev, server);
+        stateRef.current = merged;
+        setState(merged);
+      } else return;
+    }
+  }, [setMeta, setState]);
+
+  const sync = useCallback(async () => {
+    if (busy.current || disabled.current) return;
+    busy.current = true;
+    try {
+      const res = await fetch(API, { cache: "no-store" });
+      if (res.status === 404) {
+        disabled.current = true; // sem servidor (ex.: GitHub Pages): fica só local
+        return;
+      }
+      if (!res.ok) return;
+      const remote = (await res.json()) as Remote;
+      const m = meta.current!;
+      const local = stateRef.current;
+      const pending = local !== m.base;
+
+      if (!isState(remote.state)) {
+        // Servidor vazio: este aparelho envia o que tem.
+        meta.current = { rev: remote.rev, base: null };
+        await push();
+        return;
+      }
+      const server = normalize(remote.state);
+
+      if (m.rev === null && server.tasks.length === 0 && local.tasks.length > 0) {
+        // Primeira conexão de um aparelho que já tinha tarefas: elas vão para o servidor.
+        meta.current = { rev: remote.rev, base: server };
+        await push();
+      } else if (m.rev === null) {
+        setMeta(remote.rev, server);
+        setState(server);
+      } else if (pending) {
+        const merged = remote.rev === m.rev ? local : merge(m.base, local, server);
+        meta.current = { rev: remote.rev, base: server };
+        stateRef.current = merged;
+        setState(merged);
+        await push();
+      } else if (remote.rev !== m.rev) {
+        setMeta(remote.rev, server);
+        setState(server);
+      }
+    } catch {
+      /* offline: tenta de novo depois */
+    } finally {
+      busy.current = false;
+    }
+  }, [push, setMeta, setState]);
+
+  // Mudança local: envia logo (com um pequeno atraso para juntar digitação).
+  useEffect(() => {
+    if (state === meta.current?.base) return;
+    const t = window.setTimeout(sync, 400);
+    return () => window.clearTimeout(t);
+  }, [state, sync]);
+
+  // Busca novidades ao abrir, ao voltar para o app e periodicamente enquanto visível.
+  useEffect(() => {
+    sync();
+    const onWake = () => document.visibilityState === "visible" && sync();
+    const timer = window.setInterval(onWake, POLL_MS);
+    document.addEventListener("visibilitychange", onWake);
+    window.addEventListener("focus", onWake);
+    window.addEventListener("online", onWake);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onWake);
+      window.removeEventListener("focus", onWake);
+      window.removeEventListener("online", onWake);
+    };
+  }, [sync]);
+}
+
 export function useStore() {
   const [state, setState] = useState<State>(load);
 
@@ -129,6 +300,8 @@ export function useStore() {
       /* armazenamento cheio ou indisponível */
     }
   }, [state]);
+
+  useServerSync(state, setState);
 
   // Mantém abas diferentes do navegador em sincronia.
   useEffect(() => {

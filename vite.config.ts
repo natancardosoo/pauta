@@ -14,6 +14,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: { navigateFallbackDenylist: [/^\/api\//] },
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
         name: 'Pauta',
@@ -34,5 +35,7 @@ export default defineConfig({
       },
     }),
   ],
+  // Em desenvolvimento, usa o mesmo servidor de dados (npm run serve, porta 4321).
+  server: { proxy: { '/api': 'http://127.0.0.1:4321' } },
   resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') } },
 })
