@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "serve": "node server.js"
+    "serve": "node server.js",
+    "deploy": "node ../mini-servidor-mx9/ferramentas/deploy.mjs",
+    "deploy:reverter": "node ../mini-servidor-mx9/ferramentas/deploy.mjs --reverter"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.5",

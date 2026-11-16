@@ -25,3 +25,6 @@ dist-ssr
 
 # Registro do servidor local
 data
+
+# Atalho antigo de iniciar no PC (desativado)
+*.lnk.desativado

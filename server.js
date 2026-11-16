@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSyn
 import http from "node:http";
 import path from "node:path";
 
-const HOST = "127.0.0.1";
+const HOST = process.env.HOST || "127.0.0.1";
 const PORT = Number(process.env.PORT) || 4321;
 const ROOT = import.meta.dirname;
 const DIST = path.join(ROOT, "dist");
